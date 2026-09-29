@@ -8,9 +8,7 @@
     "scheme": "qr-attendance",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
-    "ios": {
-      "supportsTablet": true
-    },
+    "ios": { "supportsTablet": true },
     "android": {
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
@@ -19,8 +17,7 @@
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false,
-      "package": "com.joselitopardillo.QRATT"
+      "predictiveBackGestureEnabled": false
     },
     "web": {
       "output": "static",
@@ -36,19 +33,10 @@
           "resizeMode": "contain",
           "backgroundColor": "#ffffff"
         }
-      ],
-      "expo-sqlite",
-      "@react-native-community/datetimepicker",
-      "expo-secure-store"
+      ]
     ],
     "experiments": {
       "reactCompiler": true
-    },
-    "extra": {
-      "router": {},
-      "eas": {
-        "projectId": "34d0a67f-9303-4c1b-ba63-a12ac6b7fb7b"
-      }
     }
   }
 }

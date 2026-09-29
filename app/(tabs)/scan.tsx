@@ -1,4 +1,3 @@
-import Ionicons from '@expo/vector-icons/Ionicons';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
@@ -7,37 +6,16 @@ import AppButton from '@/components/AppButton';
 import { COLORS } from '@/constants/colors';
 
 import { useAuth } from '@/lib/auth';
-import { registerAttendance } from '@/lib/attendance';
-import { useRole } from '@/lib/role';
+import { registerAttendance } from '@/lib/database';
+
 
 export default function ScanScreen() {
+  const { user } = useAuth();
   const [permission, requestPermission] = useCameraPermissions();
   const [scanned, setScanned] = useState(false);
   const [lastData, setLastData] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
-  const { user } = useAuth();
-  const { role, loading: roleLoading } = useRole();
-
-  if (roleLoading) {
-    return (
-      <View style={styles.centered}>
-        <Text style={styles.subtitle}>Checking your account...</Text>
-      </View>
-    );
-  }
-
-  if (role === 'teacher') {
-    return (
-      <View style={styles.centered}>
-        <Ionicons name="lock-closed-outline" size={48} color={COLORS.textSecondary} />
-        <Text style={styles.lockTitle}>Students Only</Text>
-        <Text style={styles.lockText}>
-          Teacher accounts create events instead of scanning. Use the Teacher tab to generate a QR code.
-        </Text>
-      </View>
-    );
-  }
 
   if (!permission) {
     return <View style={styles.container} />;
@@ -60,7 +38,9 @@ export default function ScanScreen() {
     );
   }
 
-const handleBarcodeScanned = ({ data }: { data: string }) => {
+
+
+  const handleBarcodeScanned = ({ data }: { data: string }) => {
   setScanned(true);
   setLastData(data);
   const studentId = user?.id ?? 'unknown';
@@ -73,9 +53,7 @@ const handleBarcodeScanned = ({ data }: { data: string }) => {
 const handleScanAgain = () => {
   setScanned(false);
   setLastData(null);
-  setMessage(null);
 };
-
 
   return (
     <View style={styles.container}>
@@ -91,18 +69,19 @@ const handleScanAgain = () => {
           {scanned ? 'QR Code detected!' : 'Point your camera at a QR code'}
         </Text>
 
-      {scanned && message && (
-       <Text
-         style={[styles.scanResult, success ? styles.success : styles.error]}
-       >
-         {message}
-         </Text>
-          )}
+        {scanned && message && (
+          <Text
+           style={[styles.scanResult, success ? styles.success : styles.error]}
+        >
+          {message}
+          </Text>
+        )}
+
 
         {scanned && lastData && (
           <Text style={styles.scanData}>{lastData}</Text>
         )}
-
+        
 
         {scanned && (
           <AppButton
@@ -126,7 +105,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
   },
   camera: {
-    ...StyleSheet.absoluteFill,
+    ...StyleSheet.absoluteFillObject,
   },
   title: {
     fontSize: 20,
@@ -158,28 +137,10 @@ const styles = StyleSheet.create({
     marginBottom: 6,
     textAlign: 'center',
   },
-scanResult: { fontSize: 14, textAlign: 'center', marginBottom: 8, fontWeight: '600' },
+  scanResult: { fontSize: 14, textAlign: 'center', marginBottom: 8, fontWeight: '600' },
 success:    { color: '#2E7D32' },   // green — attendance recorded
 error:      { color: '#C62828' },   // red — failed / duplicate
 scanData:   { fontSize: 12, color: COLORS.textSecondary, textAlign: 'center', marginBottom: 12 },
-  centered: {
-    flex: 1,
-    backgroundColor: COLORS.background,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 32,
-  },
-  lockTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: COLORS.textPrimary,
-    marginTop: 12,
-    marginBottom: 6,
-  },
-  lockText: {
-    fontSize: 14,
-    color: COLORS.textSecondary,
-    textAlign: 'center',
-    lineHeight: 20,
-  },
+
 });
+

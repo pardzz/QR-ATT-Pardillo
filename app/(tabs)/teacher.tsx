@@ -1,9 +1,6 @@
-import Ionicons from '@expo/vector-icons/Ionicons';
-import DateTimePicker, {
-  type DateTimePickerEvent,
-} from '@react-native-community/datetimepicker';
 import { useState } from 'react';
 import {
+  Modal,
   Platform,
   Pressable,
   ScrollView,
@@ -12,13 +9,14 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import DateTimePicker, {
+  DateTimePickerEvent,
+} from '@react-native-community/datetimepicker';
 import QRCode from 'react-native-qrcode-svg';
 
 import AppButton from '@/components/AppButton';
 import { COLORS } from '@/constants/colors';
-import { createEvent } from '@/lib/events';
-import { buildQRPayload } from '@/lib/qr';
-import { useRole } from '@/lib/role';
+import { createEvent } from '@/lib/database';
 
 function toLocalISO(date: Date) {
   const pad = (n: number) => String(n).padStart(2, '0');
@@ -28,121 +26,114 @@ function toLocalISO(date: Date) {
   );
 }
 
-function formatDateTime(date: Date) {
-  const pad = (n: number) => String(n).padStart(2, '0');
-  const month = date.toLocaleString('en-US', { month: 'short' });
-  return `${month} ${pad(date.getDate())}, ${date.getFullYear()} at ${pad(
-    date.getHours()
-  )}:${pad(date.getMinutes())}`;
+function formatDateDisplay(isoString: string) {
+  const date = new Date(isoString);
+  if (Number.isNaN(date.getTime())) return isoString;
+  return date.toLocaleString([], {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
 }
-
-const QUICK_END_OPTIONS = [
-  { label: '+30 min', ms: 30 * 60 * 1000 },
-  { label: '+1 hour', ms: 60 * 60 * 1000 },
-  { label: '+2 hours', ms: 2 * 60 * 60 * 1000 },
-];
-
-type EditTarget = 'start' | 'end';
 
 export default function TeacherScreen() {
   const [title, setTitle] = useState('');
   const [eventId, setEventId] = useState('');
-  const [startDate, setStartDate] = useState(() => new Date());
-  const [endDate, setEndDate] = useState(
-    () => new Date(Date.now() + 60 * 60 * 1000)
-  );
-  const [editTarget, setEditTarget] = useState<EditTarget | null>(null);
-  const [editingPart, setEditingPart] = useState<'date' | 'time'>('date');
+  const [start, setStart] = useState(toLocalISO(new Date()));
+  const [end, setEnd] = useState(toLocalISO(new Date(Date.now() + 60 * 60 * 1000)));
   const [payload, setPayload] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
-  const { role, loading: roleLoading } = useRole();
+  // Date Picker States
+  const [activePicker, setActivePicker] = useState<'start' | 'end' | null>(null);
+  const [tempDate, setTempDate] = useState<Date>(new Date());
+  const [androidPickerMode, setAndroidPickerMode] = useState<'date' | 'time'>('date');
 
-  const isAndroid = Platform.OS === 'android';
-
-  const openPicker = (target: EditTarget) => {
-    setMessage(null);
-    setEditTarget(target);
-    setEditingPart('date');
+  const openPicker = (target: 'start' | 'end') => {
+    const currentDate = new Date(target === 'start' ? start : end);
+    const validDate = Number.isNaN(currentDate.getTime()) ? new Date() : currentDate;
+    setTempDate(validDate);
+    setActivePicker(target);
+    if (Platform.OS === 'android') {
+      setAndroidPickerMode('date');
+    }
   };
 
-  const onPickerChange = (
-    event: DateTimePickerEvent,
-    selected?: Date
-  ) => {
-    if (!editTarget) return;
-    if (event.type === 'dismissed' || !selected) {
-      setEditTarget(null);
-      setEditingPart('date');
+  const handleDateChange = (event: DateTimePickerEvent, selectedDate?: Date) => {
+    if (event.type === 'dismissed') {
+      setActivePicker(null);
       return;
     }
 
-    const current = editTarget === 'start' ? startDate : endDate;
-    const next = new Date(current);
-    next.setFullYear(selected.getFullYear(), selected.getMonth(), selected.getDate());
-    next.setHours(selected.getHours(), selected.getMinutes(), 0, 0);
+    if (!selectedDate) return;
 
-    if (editTarget === 'start') setStartDate(next);
-    else setEndDate(next);
+    if (Platform.OS === 'android') {
+      if (androidPickerMode === 'date') {
+        // Step 1: Combine picked date with previous time values, then ask for time
+        const updated = new Date(tempDate);
+        updated.setFullYear(selectedDate.getFullYear());
+        updated.setMonth(selectedDate.getMonth());
+        updated.setDate(selectedDate.getDate());
+        
+        setTempDate(updated);
+        setAndroidPickerMode('time'); // Switch dialog to time mode
+      } else {
+        // Step 2: Combine picked time values, save result, and close
+        const updated = new Date(tempDate);
+        updated.setHours(selectedDate.getHours());
+        updated.setMinutes(selectedDate.getMinutes());
 
-    if (isAndroid && editingPart === 'date') {
-      setEditingPart('time');
+        if (activePicker === 'start') setStart(toLocalISO(updated));
+        if (activePicker === 'end') setEnd(toLocalISO(updated));
+        setActivePicker(null);
+      }
     } else {
-      setEditTarget(null);
-      setEditingPart('date');
+      // iOS handling inside modal
+      setTempDate(selectedDate);
     }
   };
 
-  const handleQuickEnd = (ms: number) => {
-    setMessage(null);
-    setEndDate(new Date(startDate.getTime() + ms));
+  const confirmIOSDate = () => {
+    if (activePicker === 'start') setStart(toLocalISO(tempDate));
+    if (activePicker === 'end') setEnd(toLocalISO(tempDate));
+    setActivePicker(null);
   };
 
   const handleCreateEvent = () => {
     const event = {
       eventId: eventId.trim(),
       title: title.trim(),
-      start: toLocalISO(startDate),
-      end: toLocalISO(endDate),
+      start: start.trim(),
+      end: end.trim(),
     };
 
-    if (!event.eventId || !event.title) {
-      setMessage('Event title and code are required.');
+    if (!event.eventId || !event.title || !event.start || !event.end) {
+      setMessage('All fields are required.');
       return;
     }
 
-    if (endDate.getTime() <= startDate.getTime()) {
-      setMessage('End time must be after start time.');
+    const startTime = new Date(event.start).getTime();
+    const endTime = new Date(event.end).getTime();
+    if (Number.isNaN(startTime) || Number.isNaN(endTime)) {
+      setMessage('Invalid date format.');
+      return;
+    }
+    if (startTime >= endTime) {
+      setMessage('Start time must be before end time.');
       return;
     }
 
-    createEvent(event).then(({ error }) => {
-      if (error) {
-        setMessage(`Could not save the event: ${error}`);
-        return;
-      }
-      setMessage('Event saved! Scan the QR with the Scan tab to test it.');
-      setPayload(buildQRPayload(event));
-    });
+    createEvent(event)
+      .then(() => {
+        setMessage('Event saved! Scan the QR with the Scan tab to test it.');
+        setPayload(JSON.stringify({ v: 1, ...event }));
+      })
+      .catch(() => {
+        setMessage('Failed to save event. Please try again.');
+      });
   };
-
-    if (roleLoading) {
-    return (
-      <View style={styles.centered}>
-        <Text style={styles.subtitle}>Checking your account...</Text>
-      </View>
-    );
-  }
-
-  if (role !== 'teacher') {
-    return (
-      <View style={styles.centered}>
-        <Ionicons name="lock-closed-outline" size={48} color={COLORS.textSecondary} />
-        <Text style={styles.lockTitle}>Teachers Only</Text>
-        <Text style={styles.lockText}>Only teacher accounts can create events.</Text>
-      </View>
-    );
-  }
 
   return (
     <ScrollView
@@ -174,31 +165,57 @@ export default function TeacherScreen() {
         autoCapitalize="characters"
       />
 
-      <Text style={styles.label}>Starts</Text>
-      <PickerField
-        value={formatDateTime(startDate)}
-        icon="sunny-outline"
-        onPress={() => openPicker('start')}
-      />
+      <Text style={styles.label}>Start Time</Text>
+      <Pressable style={styles.dateSelector} onPress={() => openPicker('start')}>
+        <Text style={styles.dateText}>{formatDateDisplay(start)}</Text>
+        <Text style={styles.changeBadge}>Select</Text>
+      </Pressable>
 
-      <Text style={styles.label}>Ends</Text>
-      <PickerField
-        value={formatDateTime(endDate)}
-        icon="moon-outline"
-        onPress={() => openPicker('end')}
-      />
-      <View style={styles.chipRow}>
-        {QUICK_END_OPTIONS.map((option) => (
-          <Pressable
-            key={option.label}
-            style={styles.chip}
-            onPress={() => handleQuickEnd(option.ms)}
-          >
-            <Text style={styles.chipText}>{option.label}</Text>
-          </Pressable>
-        ))}
-      </View>
-      <Text style={styles.hint}>Tap a chip to set the end time from start.</Text>
+      <Text style={styles.label}>End Time</Text>
+      <Pressable style={styles.dateSelector} onPress={() => openPicker('end')}>
+        <Text style={styles.dateText}>{formatDateDisplay(end)}</Text>
+        <Text style={styles.changeBadge}>Select</Text>
+      </Pressable>
+
+      {/* iOS Modal Spinner */}
+      {Platform.OS === 'ios' && (
+        <Modal
+          visible={activePicker !== null}
+          transparent
+          animationType="slide"
+          onRequestClose={() => setActivePicker(null)}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalCard}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>
+                  Select {activePicker === 'start' ? 'Start' : 'End'} Time
+                </Text>
+                <Pressable onPress={confirmIOSDate}>
+                  <Text style={styles.doneButton}>Done</Text>
+                </Pressable>
+              </View>
+              <DateTimePicker
+                value={tempDate}
+                mode="datetime"
+                display="spinner"
+                onChange={handleDateChange}
+                textColor={COLORS.textPrimary}
+              />
+            </View>
+          </View>
+        </Modal>
+      )}
+
+      {/* Android Native Dialog (Sequential Date -> Time sequence) */}
+      {Platform.OS === 'android' && activePicker !== null && (
+        <DateTimePicker
+          value={tempDate}
+          mode={androidPickerMode}
+          display="default"
+          onChange={handleDateChange}
+        />
+      )}
 
       {message && <Text style={styles.message}>{message}</Text>}
 
@@ -208,17 +225,6 @@ export default function TeacherScreen() {
         icon="add-circle-outline"
         onPress={handleCreateEvent}
       />
-
-      {editTarget && (
-        <View style={styles.pickerContainer}>
-          <DateTimePicker
-            value={editTarget === 'start' ? startDate : endDate}
-            mode={isAndroid ? editingPart : 'datetime'}
-            display={isAndroid ? 'default' : 'spinner'}
-            onChange={onPickerChange}
-          />
-        </View>
-      )}
 
       {payload && (
         <View style={styles.resultCard}>
@@ -232,25 +238,6 @@ export default function TeacherScreen() {
         </View>
       )}
     </ScrollView>
-  );
-}
-
-type PickerFieldProps = {
-  value: string;
-  icon: keyof typeof Ionicons.glyphMap;
-  onPress: () => void;
-};
-
-function PickerField({ value, icon, onPress }: PickerFieldProps) {
-  return (
-    <Pressable
-      style={({ pressed }) => [styles.pickerField, pressed && styles.pickerFieldPressed]}
-      onPress={onPress}
-    >
-      <Ionicons name={icon} size={20} color={COLORS.primary} />
-      <Text style={styles.pickerValue}>{value}</Text>
-      <Ionicons name="calendar-outline" size={18} color={COLORS.textSecondary} />
-    </Pressable>
   );
 }
 
@@ -293,7 +280,7 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: COLORS.textPrimary,
   },
-  pickerField: {
+  dateSelector: {
     backgroundColor: COLORS.card,
     borderRadius: 14,
     borderWidth: 1,
@@ -301,48 +288,55 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 14,
     flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
   },
-  pickerFieldPressed: {
-    backgroundColor: COLORS.surface,
-  },
-  pickerValue: {
-    flex: 1,
+  dateText: {
     fontSize: 15,
-    fontWeight: '500',
     color: COLORS.textPrimary,
-    marginHorizontal: 10,
+    fontWeight: '500',
   },
-  chipRow: {
-    flexDirection: 'row',
-    marginTop: 8,
-  },
-  chip: {
-    backgroundColor: COLORS.surface,
-    borderRadius: 999,
-    paddingHorizontal: 14,
-    paddingVertical: 7,
-    marginRight: 8,
-  },
-  chipText: {
+  changeBadge: {
     fontSize: 13,
     fontWeight: '600',
     color: COLORS.primary,
   },
-  hint: {
-    fontSize: 12,
-    color: COLORS.textSecondary,
-    marginTop: 6,
+  modalOverlay: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    backgroundColor: 'rgba(0, 0, 0, 0.4)',
   },
-  pickerContainer: {
-    marginTop: 12,
+  modalCard: {
+    backgroundColor: COLORS.card,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingBottom: 30,
+    paddingHorizontal: 16,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+  },
+  modalTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: COLORS.textPrimary,
+  },
+  doneButton: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: COLORS.primary,
   },
   message: {
     fontSize: 14,
     color: COLORS.primary,
     textAlign: 'center',
     marginTop: 12,
+    marginBottom: 8,
   },
   resultCard: {
     backgroundColor: COLORS.card,
@@ -374,25 +368,5 @@ const styles = StyleSheet.create({
     color: COLORS.textSecondary,
     textAlign: 'center',
     lineHeight: 16,
-  },
-  centered: {
-    flex: 1,
-    backgroundColor: COLORS.background,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 32,
-  },
-  lockTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: COLORS.textPrimary,
-    marginTop: 12,
-    marginBottom: 6,
-  },
-  lockText: {
-    fontSize: 14,
-    color: COLORS.textSecondary,
-    textAlign: 'center',
-    lineHeight: 20,
   },
 });
